@@ -1,4 +1,4 @@
-# Builds Hullbreak 3D for Windows and publishes it as the one current release here,
+# Builds Hullbreak 3D for Windows and publishes it as the current release here (the previous one stays too),
 # where the game's launcher looks for updates.
 #
 # Runs when build.txt changes (a new version to build), or by hand from the Actions tab.
@@ -108,14 +108,18 @@ jobs:
           done
           [ $ok = 1 ] || { echo "::error::could not publish: $(tr '\n' ' ' < err.txt)"; exit 1; }
 
-      - name: Keep only the newest release
+      - name: Keep only the newest two releases
         if: steps.what.outputs.skip != 'true'
         shell: bash
         run: |
+          # the previous release stays: the launcher compares against its blockmap and
+          # downloads only the parts of the game that changed
           version="${{ steps.what.outputs.version }}"
-          gh release list -R "$GITHUB_REPOSITORY" --limit 100 --json tagName --jq '.[].tagName' | while read -r tag; do
-            if [ "$tag" != "v$version" ]; then
-              echo "Removing old release $tag"
-              gh release delete "$tag" -R "$GITHUB_REPOSITORY" --yes --cleanup-tag
-            fi
+          kept=0
+          gh release list -R "$GITHUB_REPOSITORY" --limit 100 --json tagName,createdAt --jq 'sort_by(.createdAt) | reverse | .[].tagName' | while read -r tag; do
+            if [ "$tag" = "v$version" ]; then continue; fi
+            kept=$((kept + 1))
+            if [ "$kept" -le 1 ]; then echo "Keeping the previous release $tag"; continue; fi
+            echo "Removing old release $tag"
+            gh release delete "$tag" -R "$GITHUB_REPOSITORY" --yes --cleanup-tag
           done
