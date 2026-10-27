@@ -81,8 +81,8 @@ jobs:
         working-directory: game
         run: |
           set -o pipefail
-          if ! npx electron-builder --win nsis --publish never 2>&1 | tee build.log; then
-            tail -n 15 build.log | while IFS= read -r line; do echo "::error::$line"; done
+          if ! npx electron-builder --win nsis --publish never 2>&1 | tee "$RUNNER_TEMP/build.log"; then
+            tail -n 15 "$RUNNER_TEMP/build.log" | while IFS= read -r line; do echo "::error::$line"; done
             exit 1
           fi
           ls -la dist
