@@ -32,7 +32,9 @@ jobs:
           commit=$(grep '^commit=' releases/build.txt | cut -d= -f2 | tr -d '\r ')
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "commit=$commit" >> "$GITHUB_OUTPUT"
-          if gh release view "v$version" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+          # done already (the installer and latest.yml are both up): nothing to do
+          assets=$(gh release view "v$version" -R "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' 2>/dev/null || true)
+          if echo "$assets" | grep -q '^latest.yml$' && echo "$assets" | grep -q 'setup.exe$'; then
             echo "v$version is already released: nothing to do."
             echo "skip=true" >> "$GITHUB_OUTPUT"
           fi
@@ -73,10 +75,38 @@ jobs:
         working-directory: game
         run: npm run build
 
-      - name: Build the installer and publish it
+      - name: Build the installer
         if: steps.what.outputs.skip != 'true'
+        shell: bash
         working-directory: game
-        run: npx electron-builder --win nsis --publish always
+        run: |
+          set -o pipefail
+          if ! npx electron-builder --win nsis --publish never 2>&1 | tee build.log; then
+            tail -n 15 build.log | while IFS= read -r line; do echo "::error::$line"; done
+            exit 1
+          fi
+          ls -la dist
+
+      - name: Publish the release
+        if: steps.what.outputs.skip != 'true'
+        shell: bash
+        working-directory: game
+        run: |
+          version="${{ steps.what.outputs.version }}"
+          tag="v$version"
+          # a half-finished release of this version (from a failed run) goes first
+          gh release delete "$tag" -R "$GITHUB_REPOSITORY" --yes --cleanup-tag 2>/dev/null || true
+          files=(dist/*-setup.exe dist/*-setup.exe.blockmap dist/latest.yml)
+          for f in "${files[@]}"; do [ -f "$f" ] || { echo "::error::missing $f"; exit 1; }; done
+          notes="Download **$(basename dist/*-setup.exe)** below and run it. Once installed, the game updates itself."
+          ok=0
+          for try in 1 2 3; do
+            if gh release create "$tag" "${files[@]}" -R "$GITHUB_REPOSITORY" --title "Hullbreak 3D v$version" --notes "$notes" --latest 2> err.txt; then ok=1; break; fi
+            echo "::warning::try $try: $(tr '\n' ' ' < err.txt)"
+            gh release delete "$tag" -R "$GITHUB_REPOSITORY" --yes --cleanup-tag 2>/dev/null || true
+            sleep 10
+          done
+          [ $ok = 1 ] || { echo "::error::could not publish: $(tr '\n' ' ' < err.txt)"; exit 1; }
 
       - name: Keep only the newest release
         if: steps.what.outputs.skip != 'true'
