@@ -1,0 +1,91 @@
+# Builds Hullbreak 3D for Windows and publishes it as the one current release here,
+# where the game's launcher looks for updates.
+#
+# Runs when build.txt changes (a new version to build), or by hand from the Actions tab.
+# The game's code lives in a private repository: SOURCE_TOKEN is a token that can read it.
+name: Build and release
+
+on:
+  push:
+    branches: [main]
+    paths: [build.txt]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: releases
+
+      - name: What to build
+        id: what
+        shell: bash
+        run: |
+          version=$(grep '^version=' releases/build.txt | cut -d= -f2 | tr -d '\r ')
+          commit=$(grep '^commit=' releases/build.txt | cut -d= -f2 | tr -d '\r ')
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+          if gh release view "v$version" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "v$version is already released: nothing to do."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check the source token is there
+        if: steps.what.outputs.skip != 'true'
+        shell: bash
+        env:
+          SOURCE_TOKEN: ${{ secrets.SOURCE_TOKEN }}
+        run: |
+          if [ -z "$SOURCE_TOKEN" ]; then
+            echo "::error::Add the SOURCE_TOKEN secret (Settings > Secrets and variables > Actions)."
+            exit 1
+          fi
+
+      - name: Get the game's code
+        if: steps.what.outputs.skip != 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: mattyysekk/hullbreak
+          token: ${{ secrets.SOURCE_TOKEN }}
+          ref: ${{ steps.what.outputs.commit }}
+          path: game
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        if: steps.what.outputs.skip != 'true'
+        with:
+          node-version: 22
+
+      - name: Install
+        if: steps.what.outputs.skip != 'true'
+        working-directory: game
+        run: npm ci
+
+      - name: Build the game
+        if: steps.what.outputs.skip != 'true'
+        working-directory: game
+        run: npm run build
+
+      - name: Build the installer and publish it
+        if: steps.what.outputs.skip != 'true'
+        working-directory: game
+        run: npx electron-builder --win nsis --publish always
+
+      - name: Keep only the newest release
+        if: steps.what.outputs.skip != 'true'
+        shell: bash
+        run: |
+          version="${{ steps.what.outputs.version }}"
+          gh release list -R "$GITHUB_REPOSITORY" --limit 100 --json tagName --jq '.[].tagName' | while read -r tag; do
+            if [ "$tag" != "v$version" ]; then
+              echo "Removing old release $tag"
+              gh release delete "$tag" -R "$GITHUB_REPOSITORY" --yes --cleanup-tag
+            fi
+          done
