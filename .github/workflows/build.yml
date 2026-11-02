@@ -123,3 +123,18 @@ jobs:
             echo "Removing old release $tag"
             gh release delete "$tag" -R "$GITHUB_REPOSITORY" --yes --cleanup-tag
           done
+
+      - name: Announce it on Discord (Paradoxiie)
+        if: steps.what.outputs.skip != 'true'
+        shell: bash
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+        run: |
+          # posts this version's "What's new" from the game's README to the dev-log channel; does nothing until
+          # the DISCORD_WEBHOOK secret is added, and a failure here never fails the release
+          if [ -z "$DISCORD_WEBHOOK" ]; then
+            echo "::notice::No DISCORD_WEBHOOK secret: Paradoxiie stays quiet."
+            exit 0
+          fi
+          version="${{ steps.what.outputs.version }}"
+          node releases/.github/paradoxiie/announce.mjs game/README.md "$version" "https://github.com/$GITHUB_REPOSITORY/releases/tag/v$version" || echo "::warning::Paradoxiie could not post to Discord."
