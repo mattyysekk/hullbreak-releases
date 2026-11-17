@@ -1,3 +1,3 @@
 # What to build: the version, and the commit of the game's code to build it from (changing this file starts a build).
-version=1.84.0
-commit=74957802483b273d11035c49080dbd744e8a6eb4
+version=1.85.0
+commit=02a7d1d0097b111be0b72f66f810770b961686a0
